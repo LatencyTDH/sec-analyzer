@@ -18,12 +18,13 @@ YOUR_EMAIL_ADDRESS = os.getenv("SEC_EMAIL")
 
 # Default Tickers (can be overridden if needed)
 DEFAULT_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "JPM", "GS", "BLK"]
+DEFAULT_TICKERS = ["GS"]
 
 # Default Date range
 DEFAULT_START_DATE = "2023-01-01"
 DEFAULT_END_DATE = datetime.now().strftime('%Y-%m-%d')
 
-DOWNLOAD_PATH = "sec_filings"
+DOWNLOAD_PATH = "sec-edgar-filings"
 OUTPUT_DIR = "output"
 
 # --- Argument Parsing Function ---
@@ -92,7 +93,7 @@ def main():
             continue
 
         # 2. Find downloaded filing paths
-        ticker_filing_base = os.path.join(DOWNLOAD_PATH, "sec-edgar-filings", ticker.upper(), "DEF 14A")
+        ticker_filing_base = os.path.join(DOWNLOAD_PATH, ticker.upper(), "DEF 14A")
         if not os.path.exists(ticker_filing_base):
              logging.warning(f"No downloaded filings directory found for {ticker} at {ticker_filing_base}. Skipping analysis for this ticker.")
              continue

@@ -1,44 +1,54 @@
-# Use a slim Python base image
-FROM python:3.10-slim
+# ---- Builder Stage ----
+# Use a Python image that has build tools or makes them easy to install.
+# Choose the specific Python version you need (e.g., 3.9, 3.10, 3.11)
+FROM python:3.10-slim-bullseye as builder
+LABEL stage=builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1 # Prevents python from writing .pyc files
-ENV PYTHONUNBUFFERED 1       # Ensures logs are sent straight to terminal without buffering
-
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies required by some Python packages (like lxml)
-# Clean up apt cache afterwards to keep image size down
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libxml2-dev libxslt1-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies IF needed (e.g., for lxml if wheels aren't available)
+# Combine steps and clean up apt cache in the same layer
+# If your current requirements install without errors on 'slim', you might
+# be able to remove the apt-get line entirely. Test this!
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    # Add other build deps here if needed, e.g., libxml2-dev libxslt-dev for lxml
+ && rm -rf /var/lib/apt/lists/*
 
 # Copy only the requirements file first to leverage Docker cache
 COPY requirements.txt .
 
-# Install Python dependencies
-# --no-cache-dir reduces image size
+# Install python dependencies using pip, disable cache
+# Consider using a virtual environment for cleaner separation
+RUN python -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create a non-root user and group
-RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin -c "Docker image user" appuser
-
-# Create directories for filings and output and set ownership
-# These directories will be mounted over by volumes in docker-compose
-RUN mkdir -p /app/sec_filings /app/output \
-    && chown -R appuser:appgroup /app/sec_filings \
-    && chown -R appuser:appgroup /app/output
-
-# Copy the rest of the application code into the working directory
+# Copy the rest of the application code
 COPY . .
+# Ensure .dockerignore is properly excluding venv, persistent data, .git etc.
 
-# Change ownership of the app code to the non-root user
-RUN chown -R appuser:appgroup /app
 
-# Switch to the non-root user
-USER appuser
+# ---- Final Stage ----
+# Use a minimal Python slim image for the runtime
+FROM python:3.10-slim-bullseye as final
 
-# Command to run the application
-CMD ["python", "main.py"]
+WORKDIR /app
+
+# Install runtime OS dependencies IF needed (unlikely for this app)
+# RUN apt-get update && apt-get install -y --no-install-recommends some-runtime-lib && rm -rf /var/lib/apt/lists/*
+
+# Copy the virtual environment from the builder stage
+COPY --from=builder /app/venv /app/venv
+
+# Copy only the necessary application python files from the builder stage
+COPY --from=builder /app/*.py .
+
+# Add any other .py files or necessary assets your app uses
+
+# Activate the virtual environment
+ENV PATH="/app/venv/bin:$PATH"
+
+# Set the entrypoint for the application
+ENTRYPOINT ["python", "main.py"]

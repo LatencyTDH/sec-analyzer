@@ -1,14 +1,17 @@
 # docker-compose.yml
-version: '3.8'
 
 services:
   analyzer:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     container_name: sec_analyzer_service # Renamed slightly to avoid conflicts if running multiple compose projects
     volumes:
-      - sec_data:/app/sec_filings
+      - sec_data:/app/sec-edgar-filings
+      #  - ${PERSISTENT_DOWNLOAD_PATH:-./sec_downloads}:/app/sec_filings
+      # Keep the output volume mapping as well
       - output_data:/app/output
     environment:
       - SEC_EMAIL=${SEC_EMAIL?Please set your SEC_EMAIL in .env file}

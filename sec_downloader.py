@@ -68,7 +68,7 @@ class SECDownloader:
         """
         # Structure: download_path/sec-edgar-filings/TICKER/DEF 14A/accession_number/full-submission.txt
         # Or sometimes the primary document is an HTML file directly
-        base_path = os.path.join(self.download_path, "sec-edgar-filings", ticker.upper(), "DEF 14A", accession_number_no_dashes)
+        base_path = os.path.join(self.download_path, ticker.upper(), "DEF 14A", accession_number_no_dashes)
 
         # Prioritize the primary document if it exists (often more relevant than full-submission)
         # Heuristic: Look for .htm or .html files first

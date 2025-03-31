@@ -1,34 +1,27 @@
 # .dockerignore
 
-# Python virtual environment
+# Python stuff
 venv/
-*/venv/
-
-# Python cache files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+dist/
+build/
 
-# SEC Filings and Output (these should be handled by volumes)
-sec_filings/
+# Credentials / Output / Persistent Data
+.env
 output/
+sec_downloads/ # Or your custom persistent dir name if relative
 
-# Git files
+# Git / IDE / OS files
 .git/
 .gitignore
-
-# Docker files
+.dockerignore
 Dockerfile
 docker-compose.yml
-
-# Environment file
-.env
-
-# IDE folders
-.idea/
+*.md # README etc.
 .vscode/
-
-# OS generated files
+.idea/
 *.DS_Store
-Thumbs.db
