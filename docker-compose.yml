@@ -4,25 +4,18 @@ version: '3.8'
 services:
   analyzer:
     build:
-      context: .       # Use the current directory as build context
-      dockerfile: Dockerfile # Specify the Dockerfile name
-    container_name: sec_analyzer
-    # Mount named volumes for persistence and output
-    # Data inside these volumes will persist across container runs
+      context: .
+      dockerfile: Dockerfile
+    container_name: sec_analyzer_service # Renamed slightly to avoid conflicts if running multiple compose projects
     volumes:
-      - sec_data:/app/sec_filings # Mount sec_data volume to container's filing path
-      - output_data:/app/output   # Mount output_data volume to container's output path
-    # Pass the SEC Email address from an environment file (.env)
-    # Avoids hardcoding secrets in the compose file
+      - sec_data:/app/sec_filings
+      - output_data:/app/output
     environment:
       - SEC_EMAIL=${SEC_EMAIL?Please set your SEC_EMAIL in .env file}
-    # Keep the container running after the script finishes (optional, useful for debugging)
-    # tty: true # Uncomment if you want to keep it running or exec into it easily
-    # stdin_open: true # Uncomment if you want to keep it running
+    # No 'command' here - arguments will be passed via 'docker compose run'
 
 volumes:
-  # Define the named volumes
   sec_data:
-    driver: local # Use the default local driver
+    driver: local
   output_data:
     driver: local

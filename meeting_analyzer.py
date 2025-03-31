@@ -2,16 +2,26 @@ import re
 import logging
 
 class MeetingAnalyzer:
-    """Analyzes text to determine meeting format and location."""
+    """Analyzes text to determine meeting format and location based on a target city."""
 
-    def __init__(self):
+    def __init__(self, target_city, target_state=None):
+        """
+        Initializes the analyzer with a target location.
+
+        Args:
+            target_city (str): The city name to search for. Case-insensitive.
+            target_state (str, optional): The state/region abbreviation or full name. 
+                                           Helps disambiguate city names. Case-insensitive. Defaults to None.
+        """
+        if not target_city:
+            raise ValueError("Target city must be provided.")
+            
+        self.target_city = target_city
+        self.target_state = target_state
+        logging.info(f"Analyzer initialized to search for city: '{self.target_city}'" + (f", state/region: '{self.target_state}'" if self.target_state else ""))
+
         # --- REGEX PATTERNS ---
-        # More robust patterns focusing on context
-
-        # ** Meeting Context Keywords **
-        # Look for sections/sentences discussing the annual meeting details
-        # Using broader context around keywords like "annual meeting", "shareholder meeting"
-        # (?i) for case-insensitive search
+        # (Keep the existing meeting_context, virtual_only, hybrid, not_in_person regex as they are)
         self.meeting_context_regex = re.compile(
             r"""
             (?i)                                # Case-insensitive mode
@@ -19,11 +29,8 @@ class MeetingAnalyzer:
             .*?                                 # Allow some text in between
             (?:will\s+be\s+held|location|time\s+and\s+place|virtual|online|webcast|physical|in\s+person) # Keywords indicating details
             """,
-            re.VERBOSE | re.DOTALL # Verbose allows comments, DOTALL makes '.' match newlines
+            re.VERBOSE | re.DOTALL 
         )
-
-        # ** Virtual Meeting Indicators (Strong evidence) **
-        # Prioritize explicit statements of virtual-only
         self.virtual_only_regex = re.compile(
             r"""
             (?i)                                # Case-insensitive
@@ -39,9 +46,6 @@ class MeetingAnalyzer:
             """,
             re.VERBOSE
         )
-
-        # ** Hybrid Meeting Indicators **
-        # Look for mentions of both physical and virtual participation
         self.hybrid_regex = re.compile(
             r"""
             (?i)                                # Case-insensitive
@@ -53,53 +57,6 @@ class MeetingAnalyzer:
             """,
             re.VERBOSE
         )
-
-         # ** In-Person Indicators (Look for physical address context) **
-         # This is often implicit - presence of an address without strong virtual cues
-         # We look for address patterns *near* meeting context words.
-         # Use a wider search window initially.
-        self.physical_location_context_regex = re.compile(
-            r"""
-            (?i)                                # Case-insensitive
-            (?:annual|special)\s+meeting\s+(?:of\s+)?(?:stockholder|shareholder)s? # Meeting phrase
-            .*?                                 # Any characters (non-greedy)
-            (?:will\s+be\s+held\s+at|location:|address:|place:) # Keywords indicating location follows
-            \s*                                 # Optional whitespace
-            (                                   # Start capturing group for the address snippet
-                (?:                               # Non-capturing group for address components
-                    (?:No\.|Number|\#)?\s*\d+\s+[A-Z][a-zA-Z\s,]+? # Street number and name (simple version)
-                    (?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Plaza|Suite|Floor)[\.,]? # Street type
-                    \s*
-                )?                                # Make street address optional (might just be building name)
-                (?:[A-Z][a-zA-Z\s]+?Building|[A-Z][a-zA-Z\s]+?Center|[A-Z][a-zA-Z\s]+?Plaza)? # Building Name
-                .*?                               # Allow some chars between parts
-                (?:New\s+York|NYC|Manhattan|Brooklyn|Queens|Bronx|Staten\s+Island) # NYC Boroughs/Names
-                (?:,|\s)+N(?:ew\s*)?Y(?:ork)?\.? # State (NY, New York) - optional period
-                (?:\s+\d{5}(?:-\d{4})?)?        # Optional ZIP code
-            )                                   # End capturing group
-            """,
-            re.VERBOSE | re.DOTALL
-        )
-        
-        # ** Specific NYC Location Regex (applied to snippets found above) **
-        # More precise check for NYC variations within a confirmed physical address context
-        self.nyc_regex = re.compile(
-            r"""
-            (?i)                          # Case-insensitive
-            \b(?:                         # Word boundary, start non-capturing group
-                New\s+York\s*,\s*N(?:ew\s*)?Y(?:ork)? | # New York, NY / New York, New York
-                NYC |                     # NYC
-                Manhattan |               # Manhattan
-                Brooklyn |                # Brooklyn
-                Queens |                  # Queens
-                Bronx |                   # The Bronx / Bronx
-                Staten\s+Island          # Staten Island
-            )\b                          # Word boundary
-            """,
-            re.VERBOSE
-        )
-        
-        # ** Negative cues for In-Person (Helps rule out false positives) **
         self.not_in_person_regex = re.compile(
             r"""
             (?i)
@@ -109,56 +66,96 @@ class MeetingAnalyzer:
             re.VERBOSE
         )
 
+        # ** Physical Location Context Regex (Finds potential addresses near meeting keywords) **
+        # Keep this relatively general to capture the address snippet first
+        self.physical_location_context_regex = re.compile(
+             r"""
+             (?i)                                # Case-insensitive
+             (?:annual|special)\s+meeting\s+(?:of\s+)?(?:stockholder|shareholder)s? # Meeting phrase
+             .*?                                 # Any characters (non-greedy)
+             (?:will\s+be\s+held\s+at|location:|address:|place:) # Keywords indicating location follows
+             \s*                                 # Optional whitespace
+             (                                   # Start capturing group for the address snippet
+                 (?:                             # Address lines (repeatable)
+                    (?:                             # Optional Street Address part
+                       (?:No\.|Number|\#)?\s*\d+\s+[A-Z0-9].*? # Number + Street Name (simplified)
+                       (?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Plaza|Place|Way|Court|Ct|Terrace)[\.,]? # Common street types
+                    )?
+                    .*?                             # Allow other text like building names, suites etc.
+                 ){1,3}                          # Match 1-3 lines/segments loosely
+                 (?:[A-Z][a-zA-Z\s]+?Building|[A-Z][a-zA-Z\s]+?Center|[A-Z][a-zA-Z\s]+?Plaza|Hotel\s+[A-Z][a-zA-Z]+)? # Optional Building/Hotel Name
+                 .*?                             # Allow chars between parts
+                 \b(?:[A-Z][a-zA-Z\-]+\s?){1,4}\b # Potential City Name (1-4 capitalized words)
+                 (?:,|\s)+                        # Separator
+                 [A-Z]{2}\b                      # State Abbreviation (usually present)
+                 (?:\s+\d{5}(?:-\d{4})?)?        # Optional ZIP code
+             )                                   # End capturing group
+             """,
+             re.VERBOSE | re.DOTALL
+         )
+
+
+        # ** DYNAMIC Target Location Regex (applied to snippets found above) **
+        # Builds a regex to find the specific target city and optional state
+        city_pattern = r'\b' + re.escape(self.target_city) + r'\b'
+        state_pattern = ''
+        if self.target_state:
+            # Handle common variations like abbreviation vs full name if needed
+            # For simplicity, just escape and use OR if state looks like an abbreviation vs longer name
+            escaped_state = re.escape(self.target_state)
+            if len(self.target_state) == 2 and self.target_state.isalpha(): # Likely abbreviation
+                 state_pattern = r'(?:,|\s)+\s*' + escaped_state + r'\b' # Match abbreviation after comma/space
+                 # Optional: Add common full name if possible (complex mapping needed)
+            else: # Likely full state name
+                 state_pattern = r'(?:,|\s)+\s*' + escaped_state + r'\b'
+                 # Optional: Add abbreviation if possible (complex mapping needed)
+            # Combine city and state pattern - look for city THEN state within reasonable distance
+            # Allow city, state OR city \s+ state
+            combined_pattern = city_pattern + r'(?:,|\s)*?' + state_pattern # Non-greedy match between city and state
+        else:
+            combined_pattern = city_pattern # Just look for the city name
+
+        # Compile the final dynamic regex, case-insensitive
+        self.target_location_regex = re.compile(combined_pattern, re.IGNORECASE)
+        logging.debug(f"Compiled target location regex: {self.target_location_regex.pattern}")
+
 
     def analyze(self, text):
         """
-        Analyzes the text to determine meeting format and NYC location.
+        Analyzes the text to determine meeting format and target city location.
 
         Args:
             text (str): The text content of the filing.
 
         Returns:
             dict: A dictionary containing analysis results:
-                  {'meeting_format': str, 'is_in_nyc': bool | None, 'confidence': str, 'snippet': str}
+                  {'meeting_format': str, 'is_in_target_city': bool | None, 'confidence': str, 'snippet': str}
                   meeting_format: 'In-Person', 'Virtual', 'Hybrid', 'Undetermined'
-                  is_in_nyc: True, False, or None (if not in-person or undetermined)
+                  is_in_target_city: True, False, or None (if not in-person or undetermined)
                   confidence: 'High', 'Medium', 'Low'
                   snippet: Relevant text snippet supporting the conclusion.
         """
-        if not text or len(text) < 100: # Basic check for valid text
-            return {'meeting_format': 'Undetermined', 'is_in_nyc': None, 'confidence': 'Low', 'snippet': 'No text provided or too short.'}
-
-        # --- Analysis Strategy ---
-        # 1. Look for explicit virtual-only statements.
-        # 2. Look for explicit hybrid statements.
-        # 3. Look for explicit "not in person" statements.
-        # 4. Look for physical address details near meeting context.
-        # 5. If physical address found, check if it's NYC.
-        # 6. If none of the above, classify as Undetermined.
+        if not text or len(text) < 100:
+            return {'meeting_format': 'Undetermined', 'is_in_target_city': None, 'confidence': 'Low', 'snippet': 'No text provided or too short.'}
 
         format_result = 'Undetermined'
-        is_nyc = None
+        is_target = None
         confidence = 'Low'
         snippet = ''
-
-        # Search within a reasonable window around meeting keywords first for efficiency
-        # Combine results from targeted and full searches if needed
-        # For simplicity here, we search the whole text but prioritize regex logic
-        
-        # Clean text slightly for regex robustness
         clean_text = ' '.join(text.split()) # Normalize whitespace
+
+        # --- Analysis Logic (mostly unchanged except for location check) ---
 
         # 1. Check for Virtual Only
         virtual_match = self.virtual_only_regex.search(clean_text)
         if virtual_match:
-            # Double check against hybrid keywords nearby - refine if needed
             hybrid_nearby = self.hybrid_regex.search(clean_text[max(0, virtual_match.start()-200):virtual_match.end()+200])
-            if not hybrid_nearby: # If no hybrid terms nearby, likely virtual
+            if not hybrid_nearby:
                  format_result = 'Virtual'
                  confidence = 'High'
                  snippet = virtual_match.group(0)
                  logging.info("Found strong virtual indicator.")
-                 return {'meeting_format': format_result, 'is_in_nyc': None, 'confidence': confidence, 'snippet': snippet[:500]} # Limit snippet length
+                 return {'meeting_format': format_result, 'is_in_target_city': None, 'confidence': confidence, 'snippet': snippet[:500]}
 
         # 2. Check for Hybrid
         hybrid_match = self.hybrid_regex.search(clean_text)
@@ -167,64 +164,61 @@ class MeetingAnalyzer:
             confidence = 'High'
             snippet = hybrid_match.group(0)
             logging.info("Found hybrid indicator.")
-             # Check for NYC physical location component if hybrid
+            # Check for target city physical location component if hybrid
             physical_match_hybrid = self.physical_location_context_regex.search(clean_text)
             if physical_match_hybrid:
                  address_snippet_hybrid = physical_match_hybrid.group(1) # Captured address part
-                 if self.nyc_regex.search(address_snippet_hybrid):
-                     is_nyc = True
-                     snippet += " | NYC Location Confirmed: " + address_snippet_hybrid
+                 # Use the DYNAMIC regex here
+                 if self.target_location_regex.search(address_snippet_hybrid):
+                     is_target = True
+                     snippet += f" | Target Location ({self.target_city}) Confirmed: " + address_snippet_hybrid
                  else:
-                     is_nyc = False
-                     snippet += " | Non-NYC Location Found: " + address_snippet_hybrid
+                     is_target = False
+                     snippet += " | Non-Target Location Found: " + address_snippet_hybrid
             else:
-                 is_nyc = None # Physical location mentioned but details not matched/found
+                 is_target = None # Physical location mentioned but details not matched/found
                  snippet += " | Physical location details unclear."
 
-            return {'meeting_format': format_result, 'is_in_nyc': is_nyc, 'confidence': confidence, 'snippet': snippet[:500]}
+            return {'meeting_format': format_result, 'is_in_target_city': is_target, 'confidence': confidence, 'snippet': snippet[:500]}
 
         # 3. Check for explicit "not in person"
         not_in_person_match = self.not_in_person_regex.search(clean_text)
-        if not_in_person_match and format_result == 'Undetermined': # Avoid overriding Hybrid
-             # This often implies virtual, but let's be cautious
-             format_result = 'Virtual' # Reclassify as Virtual if explicitly not physical
-             confidence = 'Medium' # Medium because it doesn't state *how* it's held
+        if not_in_person_match and format_result == 'Undetermined':
+             format_result = 'Virtual'
+             confidence = 'Medium'
              snippet = not_in_person_match.group(0)
              logging.info("Found 'not in person' indicator.")
-             return {'meeting_format': format_result, 'is_in_nyc': None, 'confidence': confidence, 'snippet': snippet[:500]}
+             return {'meeting_format': format_result, 'is_in_target_city': None, 'confidence': confidence, 'snippet': snippet[:500]}
 
 
-        # 4. Look for Physical Location Context (if not already determined as Virtual/Hybrid)
+        # 4. Look for Physical Location Context (if not already determined)
         physical_match = self.physical_location_context_regex.search(clean_text)
         if physical_match and format_result == 'Undetermined':
-             # Found a potential physical address linked to the meeting. Assume In-Person for now.
              format_result = 'In-Person'
-             confidence = 'Medium' # Medium, as virtual components might be mentioned elsewhere less explicitly
-             address_snippet = physical_match.group(1) # Get the captured address part
-             snippet = physical_match.group(0) # Get the whole match context initially
+             confidence = 'Medium'
+             address_snippet = physical_match.group(1)
+             snippet = physical_match.group(0) # Initial snippet is the broader context
              logging.info(f"Found potential physical location context: {address_snippet}")
 
-             # 5. Check if the found location is NYC
-             if self.nyc_regex.search(address_snippet):
-                 is_nyc = True
-                 confidence = 'High' # More confident if NYC match is clear within address
-                 logging.info("NYC location confirmed within address snippet.")
-                 snippet = address_snippet # Make snippet more specific to the address
+             # 5. Check if the found location is the TARGET city/state
+             # Use the DYNAMIC regex here
+             if self.target_location_regex.search(address_snippet):
+                 is_target = True
+                 confidence = 'High' # More confident if target match is clear within address
+                 logging.info(f"Target location ({self.target_city}) confirmed within address snippet.")
+                 snippet = address_snippet # Make snippet more specific
              else:
-                 is_nyc = False
-                 logging.info("Physical location found, but does not appear to be NYC.")
-                 snippet = address_snippet
+                 is_target = False
+                 logging.info(f"Physical location found, but does not appear to be target ({self.target_city}). Snippet: {address_snippet}")
+                 snippet = address_snippet # Show the non-target address
 
              # Refinement: Check again for virtual keywords *near* this physical match
-             # If virtual keywords found nearby, it might be Hybrid after all, or poorly worded virtual description
              search_window = clean_text[max(0, physical_match.start()-300):physical_match.end()+300]
              if self.virtual_only_regex.search(search_window) or re.search(r'(?i)\b(?:virtual|online|webcast|remote)\b', search_window):
-                  # If strong virtual terms are very close, it's ambiguous or Hybrid
-                  # Let's downgrade confidence or flag as ambiguous/potentially Hybrid
-                  format_result = 'Undetermined' # Revert to Undetermined due to ambiguity
+                  format_result = 'Undetermined' # Revert due to ambiguity
                   confidence = 'Low'
                   snippet = f"Ambiguous: Found physical address '{address_snippet}' but also virtual terms nearby: {search_window[max(0, physical_match.start()-300 - (max(0, physical_match.start()-300))):100]}..." # Show context
-                  is_nyc = None # Reset NYC flag due to ambiguity
+                  is_target = None # Reset flag due to ambiguity
                   logging.warning(f"Ambiguity detected: Physical address found near virtual terms. Snippet: {snippet}")
 
 
@@ -234,4 +228,4 @@ class MeetingAnalyzer:
              logging.info("Analysis complete: Format Undetermined.")
 
 
-        return {'meeting_format': format_result, 'is_in_nyc': is_nyc, 'confidence': confidence, 'snippet': snippet[:500]} # Limit snippet length
+        return {'meeting_format': format_result, 'is_in_target_city': is_target, 'confidence': confidence, 'snippet': snippet[:500]}
